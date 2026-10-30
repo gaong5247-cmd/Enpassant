@@ -11,14 +11,18 @@ attribution: Francisco B. Salgueiro and the En Croissant contributors.
 
 * **Play Chess**: select a human player and a local UCI engine, then play.
   The existing engine-controlled gameplay is unchanged.
-* An independent **Live Review** control runs a local UCI engine for 350 ms
-  before and after each played move (two positions per move).
+* Both **Play Chess** and **ANALYZE** have an independent **Live Review** control.
+  It uses a local UCI engine for 350 ms before and after each played or
+  selected move (two positions per move).
 * The review shows the played move, the engine's recommended alternative,
   the next suggested move, and evaluation.
 * If the original `getAnnotation` function classifies the move as `?!`,
-  `?`, or `??`, the notation receives that annotation during the game.
-  Every new mainline move is queued so that a fast engine reply does not drop
-  a player's preceding move.
+  `?`, or `??`, the notation receives that annotation as the result arrives.
+  Every new mainline move is queued in Play Chess, while ANALYZE reviews
+  the currently selected move (including side variations) when it changes.
+* In ANALYZE mode, the **engine recommended continuation** button plays the
+  best next move on the analysis board. The built-in analysis arrows,
+  engine panel and full **Report** continue to work as before.
 * Existing annotations are never overwritten. The original `??` and `!!`
   detection algorithm in `src/utils/score.ts`, and the report implementation
   in `src/state/store/tree.ts`, are **unaltered**.
@@ -29,13 +33,21 @@ attribution: Francisco B. Salgueiro and the En Croissant contributors.
 
 ## Usage
 
-1. Add a local UCI engine in **Engines**.
-2. Start **Play Chess** with at least one engine player.
-3. The live-review checkbox is on by default; choose a review engine.
-4. During the game the notation gains mistake annotations after the
-   evaluation finishes. Turn the checkbox off to stop analysis.
-5. Select **Analyze** to access the original full report and its unchanged
-   brilliant and blunder detection.
+1. Register a local UCI engine (e.g. Stockfish or Stockless) in **Engines**.
+2. For an engine opponent, open **Play Chess** and start a game. The new
+   Live Review section checks every move, then annotates mistakes.
+3. For manual study, open **ANALYZE**. Enable **ANALYZE 실시간 리뷰**,
+   choose the engine, then move pieces or select a move in the notation.
+   Each selected move is graded individually, including side variations.
+4. The panel shows a recommendation and a **엔진 추천 수 이어두기**
+   button to play the engine's suggested next move.
+5. Turn off the checkbox to stop new reviews. Full **Report** and the
+   upstream `??`/`!!` algorithm are unchanged.
+
+**Limitations:** Short engine thinking time makes grades provisional. The
+existing backend skips analysis of a checkmate or stalemate end position;
+terminal moves therefore cannot yet receive a live score. Live Review
+does not automatically rewrite existing brilliant annotations.
 
 ## Build
 
