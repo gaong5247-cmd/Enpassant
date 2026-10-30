@@ -4,6 +4,7 @@
 This patch does not edit score.ts, annotations, the Rust analysis engine,
 or the original brilliant/blunder classification implementation.
 """
+import json
 from pathlib import Path
 
 board = Path("src/components/boards/BoardGame.tsx")
@@ -25,3 +26,19 @@ if '<LiveReview gameId={gameId} />' not in source:
 
 board.write_text(source, encoding="utf-8")
 print("LiveReview connected; existing annotation detector files untouched")
+
+config_path = Path("src-tauri/tauri.conf.json")
+config = json.loads(config_path.read_text(encoding="utf-8"))
+config["productName"] = "Enpassant"
+config["mainBinaryName"] = "enpassant"
+config["identifier"] = "io.github.gaong5247.enpassant"
+config["app"]["windows"][0]["title"] = "Enpassant — Live Review"
+config["bundle"]["publisher"] = "Enpassant contributors"
+# The upstream updater signing key and release endpoint are not ours.
+# Keep the plugin installed but target this fork and avoid unsigned update bundles.
+config["bundle"]["createUpdaterArtifacts"] = False
+config["plugins"]["updater"]["endpoints"] = [
+    "https://github.com/gaong5247-cmd/Enpassant/releases/latest/download/latest.json"
+]
+config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+print("Fork identity and unsigned installer settings configured")
