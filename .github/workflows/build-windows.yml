@@ -9,6 +9,7 @@ on:
       - "pnpm-lock.yaml"
       - "scripts/prepare-aix-extension.mjs"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -20,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Verify complete source was imported
         shell: pwsh
