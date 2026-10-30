@@ -70,6 +70,7 @@ jobs:
         env:
           AIX_EXTENSION_TARGET: windows_amd64
           AIX_EXTENSION_FORCE_DOWNLOAD: "1"
+          GITHUB_TOKEN: ${{ github.token }}
           CI: "false"
         run: pnpm exec tauri build --bundles nsis
 
