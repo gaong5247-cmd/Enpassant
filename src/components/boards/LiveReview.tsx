@@ -43,7 +43,7 @@ function getMainlineTasks(root: TreeNode): ReviewTask[] {
       fen: node.fen,
       parentFen: parent.fen,
       uci: makeUci(node.move!),
-      san: node.san,
+      san: node.san ?? "",
       color: node.halfMoves % 2 === 1 ? "white" : "black",
     });
     parent = node;
