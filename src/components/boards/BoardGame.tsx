@@ -42,6 +42,7 @@ import {
 import type { ChessgroundRef } from "@/chessground/Chessground";
 import {
   activeTabAtom,
+  currentTabSelectedAtom,
   flipBoardAfterMoveAtom,
   currentGameIdAtom,
   currentGameStateAtom,
@@ -88,6 +89,7 @@ function mapBackendMoves(moves: { uci: string; clock: bigint | null }[]): Backen
 function BoardGame() {
   const { t } = useTranslation();
   const activeTab = useAtomValue(activeTabAtom);
+  const [, setAnalysisPanel] = useAtom(currentTabSelectedAtom);
 
   const [editingMode, toggleEditingMode] = useToggle();
   const [selectedPiece, setSelectedPiece] = useState<Piece | null>(null);
@@ -228,6 +230,7 @@ function BoardGame() {
   );
 
   function changeToAnalysisMode() {
+    setAnalysisPanel("analysis");
     setTabs((prev) =>
       prev.map((tab) => (tab.value === activeTab ? { ...tab, type: "analysis" } : tab)),
     );
