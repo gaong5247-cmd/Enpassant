@@ -1,4 +1,4 @@
-import { Badge, Checkbox, Group, Paper, Select, Stack, Text } from "@mantine/core";
+import { Badge, Button, Checkbox, Group, Paper, Select, Stack, Text } from "@mantine/core";
 import { makeUci } from "chessops";
 import { produce } from "immer";
 import { useAtomValue } from "jotai";
@@ -14,6 +14,8 @@ import { TreeStateContext } from "../common/TreeStateContext";
 import { useContext } from "react";
 
 type ReviewTask = {
+  key: string;
+  path: number[];
   ply: number;
   fen: string;
   parentFen: string;
@@ -23,6 +25,7 @@ type ReviewTask = {
 };
 
 type ReviewResult = {
+  key: string;
   busy: boolean;
   san: string;
   color: "white" | "black";
@@ -33,22 +36,46 @@ type ReviewResult = {
   message: string;
 };
 
+function toReviewTask(parent: TreeNode, node: TreeNode, path: number[]): ReviewTask | null {
+  if (!node.move) return null;
+  const uci = makeUci(node.move);
+  return {
+    key: `${path.join(",")}:${uci}:${node.fen}`,
+    path,
+    ply: path.length,
+    fen: node.fen,
+    parentFen: parent.fen,
+    uci,
+    san: node.san ?? "",
+    color: node.halfMoves % 2 === 1 ? "white" : "black",
+  };
+}
+
 function getMainlineTasks(root: TreeNode): ReviewTask[] {
   const tasks: ReviewTask[] = [];
   let parent = root;
+  let path: number[] = [];
   while (parent.children[0]?.move) {
     const node = parent.children[0];
-    tasks.push({
-      ply: tasks.length + 1,
-      fen: node.fen,
-      parentFen: parent.fen,
-      uci: makeUci(node.move!),
-      san: node.san ?? "",
-      color: node.halfMoves % 2 === 1 ? "white" : "black",
-    });
+    path = [...path, 0];
+    const task = toReviewTask(parent, node, path);
+    if (task) tasks.push(task);
     parent = node;
   }
   return tasks;
+}
+
+// ANALYZE can follow any selected variation, not only the main line.
+function getSelectedTask(root: TreeNode, path: number[]): ReviewTask | null {
+  if (path.length === 0) return null;
+  let parent = root;
+  for (let i = 0; i < path.length - 1; i++) {
+    const node = parent.children[path[i]];
+    if (!node) return null;
+    parent = node;
+  }
+  const node = parent.children[path[path.length - 1]];
+  return node ? toReviewTask(parent, node, [...path]) : null;
 }
 
 // The original getAnnotation implementation (including ?? and !! detection)
@@ -67,9 +94,16 @@ export function classifyLiveMove(analysis: MoveAnalysis[], task: ReviewTask): An
   return annotation === "??" || annotation === "?" || annotation === "?!" ? annotation : null;
 }
 
-export default function LiveReview({ gameId }: { gameId: string | null }) {
+export default function LiveReview({
+  gameId,
+  mode = "game",
+}: {
+  gameId?: string | null;
+  mode?: "game" | "analysis";
+}) {
   const store = useContext(TreeStateContext)!;
   const root = useStore(store, (s) => s.root);
+  const position = useStore(store, (s) => s.position);
   const activeTab = useAtomValue(activeTabAtom);
   const engines = useAtomValue(enginesAtom);
   const localEngines = useMemo(
@@ -81,9 +115,26 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
   const engine = localEngines.find((e) => e.id === selectedId) ?? localEngines[0];
   const [result, setResult] = useState<ReviewResult | null>(null);
 
-  const tasks = useMemo(() => getMainlineTasks(root), [root]);
-  const signature = tasks.map((t) => t.uci + ":" + t.fen).join("|");
-  const session = [activeTab, gameId, engine?.id, engine?.path, enabled].join(":");
+  const scopeId = mode === "analysis" ? `analysis-${activeTab}` : gameId;
+  const tasks = useMemo(() => {
+    if (mode === "game") return getMainlineTasks(root);
+    const selected = getSelectedTask(root, position);
+    return selected ? [selected] : [];
+  }, [root, position, mode]);
+  const signature = tasks.map((t) => t.key).join("|");
+  const session = [activeTab, scopeId, engine?.id, engine?.path, enabled].join(":");
+  const visibleResult =
+    mode === "analysis" && result?.key !== tasks[0]?.key ? null : result;
+
+  const followEngine = useCallback(() => {
+    if (mode !== "analysis" || !visibleResult || visibleResult.busy || !visibleResult.bestAfter) {
+      return;
+    }
+    const current = store.getState();
+    const selected = getSelectedTask(current.root, current.position);
+    if (selected?.key !== visibleResult.key) return;
+    current.makeMoves({ payload: [visibleResult.bestAfter] });
+  }, [mode, store, visibleResult]);
 
   const sessionRef = useRef("");
   const generation = useRef(0);
@@ -93,15 +144,16 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
   const activeAnalysisId = useRef<string | null>(null);
 
   const runPending = useCallback(async () => {
-    if (working.current || !engine || !activeTab || !gameId) return;
+    if (working.current || !engine || !activeTab || !scopeId) return;
     working.current = true;
     const epoch = generation.current;
     try {
       while (generation.current === epoch && pending.current.length) {
         const task = pending.current.shift()!;
-        const id = `live-review-${activeTab}-${gameId}-${epoch}-${task.ply}`;
+        const id = `live-review-${activeTab}-${scopeId}-${epoch}-${task.ply}`;
         activeAnalysisId.current = id;
         setResult({
+          key: task.key,
           busy: true, san: task.san, color: task.color, grade: null,
           bestBefore: "", bestAfter: "", score: "", message: "엔진 분석 중…",
         });
@@ -124,6 +176,7 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
           if (generation.current !== epoch) return;
           if (response.status === "error") {
             setResult({
+              key: task.key,
               busy: false, san: task.san, color: task.color, grade: null,
               bestBefore: "", bestAfter: "", score: "", message: String(response.error),
             });
@@ -134,6 +187,7 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
           const after = response.data[1]?.best[0];
           if (!before || !after) {
             setResult({
+              key: task.key,
               busy: false, san: task.san, color: task.color, grade: null,
               bestBefore: "", bestAfter: "", score: "", message: "종료된 포지션이거나 평가 정보가 없습니다.",
             });
@@ -144,7 +198,7 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
             store.setState((state) =>
               produce(state, (draft) => {
                 let node: TreeNode | undefined = draft.root;
-                for (let index = 0; index < task.ply; index++) node = node?.children[0];
+                for (const index of task.path) node = node?.children[index];
                 if (!node || node.fen !== task.fen || node.annotations.some(isBasicAnnotation)) return;
                 node.annotations.push(grade);
                 draft.dirty = true;
@@ -152,6 +206,7 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
             );
           }
           setResult({
+            key: task.key,
             busy: false, san: task.san, color: task.color, grade,
             bestBefore: before.sanMoves[0] ?? "",
             bestAfter: after.sanMoves[0] ?? "",
@@ -161,6 +216,7 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
         } catch (error) {
           if (generation.current === epoch) {
             setResult({
+              key: task.key,
               busy: false, san: task.san, color: task.color, grade: null,
               bestBefore: "", bestAfter: "", score: "", message: String(error),
             });
@@ -172,7 +228,7 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
     } finally {
       if (generation.current === epoch) working.current = false;
     }
-  }, [engine, activeTab, gameId, store]);
+  }, [engine, activeTab, scopeId, store]);
 
   useEffect(() => {
     if (sessionRef.current !== session) {
@@ -185,9 +241,9 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
       working.current = false;
       setResult(null);
     }
-    if (!enabled || !engine || !gameId || !activeTab) return;
+    if (!enabled || !engine || !scopeId || !activeTab) return;
 
-    const keys = tasks.map((t) => t.uci + ":" + t.fen);
+    const keys = tasks.map((t) => t.key);
     const diverged = seen.current.some((key, i) => i >= keys.length || keys[i] !== key);
     if (diverged) {
       generation.current += 1;
@@ -200,7 +256,7 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
     for (let i = seen.current.length; i < tasks.length; i++) pending.current.push(tasks[i]);
     seen.current = keys;
     void runPending();
-  }, [session, signature, enabled, engine, gameId, activeTab, runPending]);
+  }, [session, signature, enabled, engine, scopeId, activeTab, runPending]);
 
   useEffect(
     () => () => {
@@ -217,12 +273,12 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
           <Checkbox
             size="xs"
             checked={enabled}
-            label="실시간 리뷰 · 자동 ?/?? 표시"
+            label={mode === "analysis" ? "ANALYZE 실시간 리뷰 · ?/??" : "실시간 리뷰 · 자동 ?/?? 표시"}
             onChange={(event) => setEnabled(event.currentTarget.checked)}
           />
-          {result?.grade && (
-            <Badge color={result.grade === "??" ? "red" : result.grade === "?" ? "orange" : "yellow"}>
-              {result.san} {result.grade}
+          {visibleResult?.grade && (
+            <Badge color={visibleResult.grade === "??" ? "red" : visibleResult.grade === "?" ? "orange" : "yellow"}>
+              {visibleResult.san} {visibleResult.grade}
             </Badge>
           )}
         </Group>
@@ -235,17 +291,24 @@ export default function LiveReview({ gameId }: { gameId: string | null }) {
           disabled={!enabled || localEngines.length === 0}
           allowDeselect={false}
         />
+        {enabled && mode === "analysis" && visibleResult?.bestAfter && !visibleResult.busy && (
+          <Button size="xs" variant="light" onClick={followEngine}>
+            엔진 추천 수 이어두기: {visibleResult.bestAfter}
+          </Button>
+        )}
         {enabled && (
-          <Text fz="xs" c={result?.message ? "dimmed" : undefined}>
+          <Text fz="xs" c={visibleResult?.message ? "dimmed" : undefined}>
             {!engine
               ? "엔진 관리에서 Stockfish 등 로컬 UCI 엔진을 추가하세요."
-              : result?.busy
-                ? `${result.san}: ${result.message}`
-                : result?.message
-                  ? result.message
-                  : result
-                    ? `${result.color === "white" ? "백" : "흑"} ${result.san}${result.grade ?? ""} · 추천: ${result.bestBefore || "—"} · 다음 수: ${result.bestAfter || "—"} · 평가 ${result.score}`
-                    : "착수마다 엔진이 평가해 실수 수에 즉시 기호를 붙입니다."}
+              : visibleResult?.busy
+                ? `${visibleResult.san}: ${visibleResult.message}`
+                : visibleResult?.message
+                  ? visibleResult.message
+                  : visibleResult
+                    ? `${visibleResult.color === "white" ? "백" : "흑"} ${visibleResult.san}${visibleResult.grade ?? ""} · 추천: ${visibleResult.bestBefore || "—"} · 다음 수: ${visibleResult.bestAfter || "—"} · 평가 ${visibleResult.score}`
+                    : mode === "analysis"
+                      ? "ANALYZE에서 수를 두거나 기보의 수를 선택하면 엔진이 실수를 검사합니다."
+                      : "착수마다 엔진이 평가해 실수 수에 즉시 기호를 붙입니다."}
           </Text>
         )}
       </Stack>
