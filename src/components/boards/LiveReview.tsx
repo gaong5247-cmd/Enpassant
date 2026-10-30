@@ -2,7 +2,7 @@ import { Badge, Button, Checkbox, Group, Paper, Select, Stack, Text } from "@man
 import { makeUci } from "chessops";
 import { produce } from "immer";
 import { useAtomValue } from "jotai";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { commands, type MoveAnalysis } from "@/bindings";
 import { activeTabAtom, enginesAtom } from "@/state/atoms";
@@ -11,7 +11,6 @@ import { formatScore, getAnnotation } from "@/utils/score";
 import type { TreeNode } from "@/utils/treeReducer";
 import type { LocalEngine } from "@/utils/engines";
 import { TreeStateContext } from "../common/TreeStateContext";
-import { useContext } from "react";
 
 type ReviewTask = {
   key: string;
@@ -66,7 +65,7 @@ function getMainlineTasks(root: TreeNode): ReviewTask[] {
 }
 
 // ANALYZE can follow any selected variation, not only the main line.
-function getSelectedTask(root: TreeNode, path: number[]): ReviewTask | null {
+export function getSelectedTask(root: TreeNode, path: number[]): ReviewTask | null {
   if (path.length === 0) return null;
   let parent = root;
   for (let i = 0; i < path.length - 1; i++) {
@@ -276,7 +275,7 @@ export default function LiveReview({
             label={mode === "analysis" ? "ANALYZE 실시간 리뷰 · ?/??" : "실시간 리뷰 · 자동 ?/?? 표시"}
             onChange={(event) => setEnabled(event.currentTarget.checked)}
           />
-          {visibleResult?.grade && (
+          {enabled && visibleResult?.grade && (
             <Badge color={visibleResult.grade === "??" ? "red" : visibleResult.grade === "?" ? "orange" : "yellow"}>
               {visibleResult.san} {visibleResult.grade}
             </Badge>
