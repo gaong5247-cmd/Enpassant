@@ -1,4 +1,4 @@
-import { Paper, Portal, Stack, Tabs } from "@mantine/core";
+import { Box, Paper, Portal, Stack, Tabs } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
 import {
   IconDatabase,
@@ -44,6 +44,7 @@ import Board from "./Board";
 import BoardControls from "./BoardControls";
 import EditingCard from "./EditingCard";
 import EvalListener from "./EvalListener";
+import LiveReview from "./LiveReview";
 
 function BoardAnalysis() {
   const { t } = useTranslation();
@@ -290,7 +291,12 @@ function BoardAnalysis() {
               <AnnotationPanel />
             </Tabs.Panel>
             <Tabs.Panel value="analysis" flex={1} style={{ overflowY: "hidden" }}>
-              <AnalysisPanel />
+              <Stack h="100%" gap="xs">
+                <LiveReview mode="analysis" />
+                <Box flex={1} style={{ minHeight: 0 }}>
+                  <AnalysisPanel />
+                </Box>
+              </Stack>
             </Tabs.Panel>
           </Tabs>
         </Paper>
