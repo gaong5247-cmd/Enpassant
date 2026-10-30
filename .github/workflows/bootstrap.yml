@@ -1,0 +1,60 @@
+name: Import full En Croissant source
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bootstrap.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout Enpassant
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Import pinned GPL-3.0 upstream and wire live review
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package.json ]]; then
+            echo "Source is already imported; not overwriting user edits."
+            exit 0
+          fi
+          git clone --depth 1 https://github.com/franciscoBSalgueiro/en-croissant.git /tmp/en-croissant
+          UPSTREAM_SHA=8c4a1e45893061cb50a5d3bd656818870dc3332b
+          if [[ "$(git -C /tmp/en-croissant rev-parse HEAD)" != "$UPSTREAM_SHA" ]]; then
+            git -C /tmp/en-croissant fetch --depth 1 origin "$UPSTREAM_SHA"
+            git -C /tmp/en-croissant checkout --detach "$UPSTREAM_SHA"
+          fi
+
+          # Preserve the upstream workflow files without activating its releases.
+          mkdir -p .github/upstream-workflows
+          cp /tmp/en-croissant/.github/workflows/*.yml .github/upstream-workflows/
+
+          # Merge the entire application, including binaries, assets and GPL license.
+          rsync -a --exclude='/.git/' --exclude='/.github/workflows/' /tmp/en-croissant/ ./
+          python3 scripts/apply_live_review.py
+          cmp /tmp/en-croissant/src/utils/score.ts src/utils/score.ts
+          cmp /tmp/en-croissant/src/state/store/tree.ts src/state/store/tree.ts
+          cmp /tmp/en-croissant/src/utils/annotation.ts src/utils/annotation.ts
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --stat
+          git commit -m "Import complete upstream En Croissant and connect realtime game review"
+          git push origin HEAD:main
+
+  windows:
+    needs: import
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-windows.yml
