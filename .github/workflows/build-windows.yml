@@ -1,0 +1,81 @@
+name: Build Enpassant Windows
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "scripts/prepare-aix-extension.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify complete source was imported
+        shell: pwsh
+        run: |
+          if (!(Test-Path src-tauri/tauri.conf.json)) { throw "Upstream source has not been imported yet" }
+          if (!(Test-Path src/components/boards/LiveReview.tsx)) { throw "Live review module is missing" }
+
+      - name: Verify upstream annotation logic is unchanged
+        shell: pwsh
+        run: |
+          git fetch --depth 1 https://github.com/franciscoBSalgueiro/en-croissant.git 8c4a1e45893061cb50a5d3bd656818870dc3332b
+          $files = @("src/utils/score.ts", "src/state/store/tree.ts", "src/utils/annotation.ts")
+          foreach ($file in $files) {
+            $original = (git rev-parse "FETCH_HEAD:${file}").Trim()
+            $current = (git hash-object $file).Trim()
+            if ($original -ne $current) { throw "Protected annotation source changed: $file" }
+          }
+
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "12.15.0"
+
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Build Windows NSIS installer
+        env:
+          AIX_EXTENSION_TARGET: windows_amd64
+          AIX_EXTENSION_FORCE_DOWNLOAD: "1"
+          CI: "false"
+        run: pnpm exec tauri build --bundles nsis
+
+      - name: Upload Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: Enpassant-Windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            src-tauri/target/release/enpassant.exe
+            src-tauri/target/release/bundle/nsis/*.exe
